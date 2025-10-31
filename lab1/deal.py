@@ -63,8 +63,8 @@ class DEAL(SymmetricBlockCipher):
     Ключ: либо 16 байт (128 бит), либо ровно block_size байт.
     """
     def __init__(self, rounds: int = 16, block_size: int = 16):
-        if block_size not in (16, 24, 32):
-            raise ValueError("DEAL block_size must be 16, 24, or 32 bytes (128/192/256 bits)")
+        if block_size != 16:
+            raise ValueError("DEAL block_size must be 16 (128 bits)")
         self.block_size = block_size
         half = block_size // 2
         self._ks = DEALKeySchedule(rounds)
@@ -72,8 +72,8 @@ class DEAL(SymmetricBlockCipher):
         self._feistel = FeistelNetwork(half_size=half, rounds=rounds, ks=self._ks, rf=self._rf)
 
     def configure(self, key: bytes) -> None:
-        if not (len(key) == 16 or len(key) == self.block_size):
-            raise ValueError(f"DEAL key must be 16 bytes or {self.block_size} bytes")
+        if len(key) not in (16, 24, 32):
+            raise ValueError(f"DEAL key must be 16, 24 or 32 bytes")
         self._feistel.configure(key)
 
     def encrypt_block(self, block: bytes) -> bytes:
