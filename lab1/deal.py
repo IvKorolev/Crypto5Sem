@@ -62,7 +62,7 @@ class DEAL(SymmetricBlockCipher):
     фрагментами R. Поддерживает block_size 16/24/32 (128/192/256 бит).
     Ключ: либо 16 байт (128 бит), либо ровно block_size байт.
     """
-    def __init__(self, rounds: int = 16, block_size: int = 16):
+    def __init__(self, rounds: int = 6, block_size: int = 16):
         if block_size != 16:
             raise ValueError("DEAL block_size must be 16 (128 bits)")
         self.block_size = block_size
