@@ -38,7 +38,6 @@ class DEALFRound(RoundFunction):
         return d
 
     def F(self, right_half: bytes, round_key: bytes) -> bytes:
-        # right_half может быть 8/12/16 байт (и вообще любое число >=1 и <= half_size)
         if len(right_half) != self.half_size:
             raise ValueError("DEAL right half must equal Feistel half_size")
 
@@ -59,8 +58,8 @@ class DEALFRound(RoundFunction):
 class DEAL(SymmetricBlockCipher):
     """
     DEAL: блочный шифр на сети Фейстеля, где F(R, K) строится из DES_K над 8-байтовыми
-    фрагментами R. Поддерживает block_size 16/24/32 (128/192/256 бит).
-    Ключ: либо 16 байт (128 бит), либо ровно block_size байт.
+    фрагментами R. Поддерживает block_size 16.
+    Ключ: 16/24/32 (128/192/256 бит).
     """
     def __init__(self, rounds: int = 6, block_size: int = 16):
         if block_size != 16:
