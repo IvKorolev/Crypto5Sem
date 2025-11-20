@@ -29,7 +29,6 @@ def _set_bit(bits: bytearray, bit_index: int, value: int, lsb_first: bool) -> No
 def permute_bits(
     data: bytes,
     pblock: Iterable[int],
-    *,
     lsb_first: bool = False,
     start_index0: bool = True,
 ) -> bytes:
