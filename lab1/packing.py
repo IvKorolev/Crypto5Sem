@@ -42,7 +42,6 @@ def unpad(data: bytes, block_size: int, mode: PaddingMode) -> bytes:
             raise ValueError("Bad PKCS7 padding")
         return data[:-last]
     if mode == PaddingMode.ISO_10126:
-        # случайные байты, только длина значима
         return data[:-last]
     raise ValueError("Unknown padding")
 
@@ -73,10 +72,8 @@ class CryptoContext:
     Асинхронные методы encrypt/decrypt возвращают bytes и умеют работать с файлами.
     Параллелизация там, где поддерживается
     """
-
     def __init__(
         self,
-        *,
         cipher: SymmetricBlockCipher,
         key: bytes,
         mode: CipherMode,
@@ -96,136 +93,152 @@ class CryptoContext:
             if len(iv) != self.cipher.block_size:
                 raise ValueError("IV must match block size")
 
-    def _encrypt_blocks(self, blocks: List[bytes]) -> List[bytes]:
-        bs = self.cipher.block_size
-        mode = self.mode
-        iv = bytearray(self.iv) if self.iv else bytearray(bs)
-        res: List[bytes] = []
-        if mode == CipherMode.ECB:
-            with ThreadPoolExecutor() as ex:
-                res = list(ex.map(self.cipher.encrypt_block, blocks))
-        elif mode == CipherMode.CBC:
-            prev = bytes(iv)
-            for b in blocks:
-                x = _xor(b, prev)
-                c = self.cipher.encrypt_block(x)
-                res.append(c)
-                prev = c
-        elif mode == CipherMode.PCBC:
-            prev_p = bytes(iv)
-            prev_c = bytes(iv)
-            for p in blocks:
-                x = _xor(p, _xor(prev_p, prev_c))
-                c = self.cipher.encrypt_block(x)
-                res.append(c)
-                prev_p, prev_c = p, c
-        elif mode == CipherMode.CFB:
-            shift = self.extra.get('segment_size', bs)
-            if shift != bs:
-                raise NotImplementedError("Only full-block CFB implemented")
-            prev = bytes(iv)
-            for p in blocks:
-                s = self.cipher.encrypt_block(prev)
-                c = _xor(p, s)
-                res.append(c)
-                prev = c
-        elif mode == CipherMode.OFB:
-            prev = bytes(iv)
-            for p in blocks:
-                prev = self.cipher.encrypt_block(prev)
-                c = _xor(p, prev)
-                res.append(c)
-        elif mode == CipherMode.CTR:
-            counter = bytearray(iv)
-            for p in blocks:
-                s = self.cipher.encrypt_block(bytes(counter))  # 1 раз на блок
-                _inc_counter(counter)
-                res.append(_xor(p, s))
+    def _encrypt_ecb(self, blocks: List[bytes]) -> List[bytes]:
+        with ThreadPoolExecutor() as ex:
+            return list(ex.map(self.cipher.encrypt_block, blocks))
 
-        elif mode == CipherMode.RANDOM_DELTA:
-            # Потоковый вариант: ключевой поток = E(IV || i) xor E(Delta_i)
-            # Delta_i берём из детермин. PRNG на IV.
-            bs = self.cipher.block_size
-            seed = int.from_bytes(self.iv, 'big') ^ 0xA5A5A5A55A5A5A5A
-            a = 6364136223846793005
-            c = 1442695040888963407
-            counter = bytearray(self.iv)
-            for i, p in enumerate(blocks):
-                # генерация delta
-                seed = (a * seed + c) & ((1 << 64) - 1)
-                delta = seed.to_bytes(min(8, bs), 'big')
-                delta = (delta * (bs // len(delta) + 1))[:bs]
-                s1 = self.cipher.encrypt_block(bytes(counter))
-                s2 = self.cipher.encrypt_block(delta)
-                keystream = _xor(s1, s2)
-                _inc_counter(counter)
-                res.append(_xor(p, keystream))
-        else:
-            raise ValueError("Unsupported mode")
+    def _encrypt_cbc(self, blocks: List[bytes]) -> List[bytes]:
+        res = []
+        prev = bytes(self.iv)
+        for b in blocks:
+            x = _xor(b, prev)
+            c = self.cipher.encrypt_block(x)
+            res.append(c)
+            prev = c
         return res
+
+    def _encrypt_pcbc(self, blocks: List[bytes]) -> List[bytes]:
+        res = []
+        prev_p = bytes(self.iv)
+        prev_c = bytes(self.iv)
+
+        for p in blocks:
+            x = _xor(p, _xor(prev_p, prev_c))
+            c = self.cipher.encrypt_block(x)
+            res.append(c)
+            prev_p = p
+            prev_c = c
+        return res
+
+    def _encrypt_cfb(self, blocks: List[bytes]) -> List[bytes]:
+        res = []
+        prev = bytes(self.iv)
+        for p in blocks:
+            gamma = self.cipher.encrypt_block(prev)
+            c = _xor(p, gamma)
+            res.append(c)
+            prev = c
+        return res
+
+    def _encrypt_ofb(self, blocks: List[bytes]) -> List[bytes]:
+        res = []
+        prev = bytes(self.iv)
+        for p in blocks:
+            gamma = self.cipher.encrypt_block(prev)
+            c = _xor(p, gamma)
+            res.append(c)
+            prev = gamma
+        return res
+
+    def _encrypt_ctr(self, blocks: List[bytes]) -> List[bytes]:
+        res = []
+        counter = bytearray(self.iv)
+        for p in blocks:
+            gamma = self.cipher.encrypt_block(bytes(counter))
+            _inc_counter(counter)
+            c = _xor(p, gamma)
+            res.append(c)
+        return res
+
+    def _encrypt_random_delta(self, blocks: List[bytes]) -> List[bytes]:
+        res = []
+        a = 1664525
+        c = 1013904223
+        mask = 0xFFFFFFFFFFFFFFFF
+
+        seed = int.from_bytes(self.iv, 'big')
+
+        for p in blocks:
+            seed = (a * seed + c) & mask
+            seed_bytes = seed.to_bytes(8, 'big')
+            gamma = self.cipher.encrypt_block(seed_bytes)
+            res.append(_xor(p, gamma))
+        return res
+
+    def _decrypt_ecb(self, blocks: List[bytes]) -> List[bytes]:
+        with ThreadPoolExecutor() as ex:
+            return list(ex.map(self.cipher.decrypt_block, blocks))
+
+    def _decrypt_cbc(self, blocks: List[bytes]) -> List[bytes]:
+        res = []
+        prev = bytes(self.iv)
+        for c in blocks:
+            decrypted = self.cipher.decrypt_block(c)
+            p = _xor(decrypted, prev)
+            res.append(p)
+            prev = c
+        return res
+
+    def _decrypt_pcbc(self, blocks: List[bytes]) -> List[bytes]:
+        res = []
+        prev_p = bytes(self.iv)
+        prev_c = bytes(self.iv)
+
+        for c in blocks:
+            decrypted = self.cipher.decrypt_block(c)
+            xor_mask = _xor(prev_p, prev_c)
+            p = _xor(decrypted, xor_mask)
+
+            res.append(p)
+            prev_c = c
+            prev_p = p
+        return res
+
+    def _decrypt_cfb(self, blocks: List[bytes]) -> List[bytes]:
+        res = []
+        prev = bytes(self.iv)
+        for c in blocks:
+            gamma = self.cipher.encrypt_block(prev)
+            p = _xor(c, gamma)
+            res.append(p)
+            prev = c
+        return res
+
+    def _encrypt_blocks(self, blocks: List[bytes]) -> List[bytes]:
+        if self.mode == CipherMode.ECB:
+            return self._encrypt_ecb(blocks)
+        elif self.mode == CipherMode.CBC:
+            return self._encrypt_cbc(blocks)
+        elif self.mode == CipherMode.PCBC:
+            return self._encrypt_pcbc(blocks)
+        elif self.mode == CipherMode.CFB:
+            return self._encrypt_cfb(blocks)
+        elif self.mode == CipherMode.OFB:
+            return self._encrypt_ofb(blocks)
+        elif self.mode == CipherMode.CTR:
+            return self._encrypt_ctr(blocks)
+        elif self.mode == CipherMode.RANDOM_DELTA:
+            return self._encrypt_random_delta(blocks)
+        else:
+            raise ValueError(f"Unsupported mode: {self.mode}")
 
     def _decrypt_blocks(self, blocks: List[bytes]) -> List[bytes]:
-        bs = self.cipher.block_size
-        mode = self.mode
-        iv = bytearray(self.iv) if self.iv else bytearray(bs)
-        res: List[bytes] = []
-        if mode == CipherMode.ECB:
-            with ThreadPoolExecutor() as ex:
-                res = list(ex.map(self.cipher.decrypt_block, blocks))
-        elif mode == CipherMode.CBC:
-            prev = bytes(iv)
-            for b in blocks:
-                p = self.cipher.decrypt_block(b)
-                res.append(_xor(p, prev))
-                prev = b
-        elif mode == CipherMode.PCBC:
-            prev_p = bytes(iv)
-            prev_c = bytes(iv)
-            for c in blocks:
-                p_tmp = self.cipher.decrypt_block(c)
-                p = _xor(p_tmp, _xor(prev_p, prev_c))
-                res.append(p)
-                prev_p, prev_c = p, c
-        elif mode == CipherMode.CFB:
-            shift = self.extra.get('segment_size', bs)
-            if shift != bs:
-                raise NotImplementedError("Only full-block CFB implemented")
-            prev = bytes(iv)
-            for c in blocks:
-                s = self.cipher.encrypt_block(prev)
-                p = _xor(c, s)
-                res.append(p)
-                prev = c
-        elif mode == CipherMode.OFB:
-            prev = bytes(iv)
-            for c in blocks:
-                prev = self.cipher.encrypt_block(prev)
-                p = _xor(c, prev)
-                res.append(p)
-        elif mode == CipherMode.CTR:
-            counter = bytearray(iv)
-            for c in blocks:
-                s = self.cipher.encrypt_block(bytes(counter))
-                _inc_counter(counter)
-                res.append(_xor(c, s))
-        elif mode == CipherMode.RANDOM_DELTA:
-            bs = self.cipher.block_size
-            seed = int.from_bytes(self.iv, 'big') ^ 0xA5A5A5A55A5A5A5A
-            a = 6364136223846793005
-            c = 1442695040888963407
-            counter = bytearray(self.iv)
-            for ciph in blocks:
-                seed = (a * seed + c) & ((1 << 64) - 1)
-                delta = seed.to_bytes(min(8, bs), 'big')
-                delta = (delta * (bs // len(delta) + 1))[:bs]
-                s1 = self.cipher.encrypt_block(bytes(counter))
-                s2 = self.cipher.encrypt_block(delta)
-                keystream = _xor(s1, s2)
-                _inc_counter(counter)
-                res.append(_xor(ciph, keystream))
+        if self.mode == CipherMode.ECB:
+            return self._decrypt_ecb(blocks)
+        elif self.mode == CipherMode.CBC:
+            return self._decrypt_cbc(blocks)
+        elif self.mode == CipherMode.PCBC:
+            return self._decrypt_pcbc(blocks)
+        elif self.mode == CipherMode.CFB:
+            return self._decrypt_cfb(blocks)
+        elif self.mode == CipherMode.OFB:
+            return self._encrypt_ofb(blocks)
+        elif self.mode == CipherMode.CTR:
+            return self._encrypt_ctr(blocks)
+        elif self.mode == CipherMode.RANDOM_DELTA:
+            return self._encrypt_random_delta(blocks)
         else:
-            raise ValueError("Unsupported mode")
-        return res
+            raise ValueError(f"Unsupported mode: {self.mode}")
 
     async def encrypt(self, data: bytes) -> bytes:
         bs = self.cipher.block_size
@@ -247,49 +260,45 @@ class CryptoContext:
         bs = self.cipher.block_size
         chunk = bs * chunk_blocks
         size = os.path.getsize(in_path)
-        to_pad_tail = size % chunk
-        async with asyncio.Lock():
-            with open(in_path, 'rb') as f_in, open(out_path, 'wb') as f_out:
-                while True:
-                    buf = f_in.read(chunk)
-                    if not buf:
-                        break
-                    # только последняя пачка получает padding
-                    if f_in.tell() == size:
-                        buf = pad(buf, bs, self.padding)
-                    else:
-                        if len(buf) % bs != 0:
-                            # дочитаем чтобы кратно блоку
-                            tail = f_in.read(bs - (len(buf) % bs))
-                            buf += tail
-                    blocks = [buf[i : i + bs] for i in range(0, len(buf), bs)]
-                    enc_blocks = await asyncio.to_thread(self._encrypt_blocks, blocks)
-                    f_out.write(b"".join(enc_blocks))
+        with open(in_path, 'rb') as f_in, open(out_path, 'wb') as f_out:
+            while True:
+                buf = f_in.read(chunk)
+                if not buf:
+                    break
+                # только последняя пачка получает padding
+                if f_in.tell() == size:
+                    buf = pad(buf, bs, self.padding)
+                else:
+                    if len(buf) % bs != 0:
+                        # дочитаем чтобы кратно блоку
+                        tail = f_in.read(bs - (len(buf) % bs))
+                        buf += tail
+                blocks = [buf[i : i + bs] for i in range(0, len(buf), bs)]
+                enc_blocks = await asyncio.to_thread(self._encrypt_blocks, blocks)
+                f_out.write(b"".join(enc_blocks))
 
     async def decrypt_file(self, in_path: str, out_path: str, chunk_blocks: int = 1 << 14) -> None:
         bs = self.cipher.block_size
         chunk = bs * chunk_blocks
-        size = os.path.getsize(in_path)
-        async with asyncio.Lock():
-            with open(in_path, 'rb') as f_in, open(out_path, 'wb') as f_out:
-                buf_acc = b""
-                while True:
-                    buf = f_in.read(chunk)
-                    if not buf:
-                        break
-                    buf_acc += buf
-                    # обрабатываем блоками, паддинг снимем в конце
-                    while len(buf_acc) >= chunk:
-                        part, buf_acc = buf_acc[:chunk], buf_acc[chunk:]
-                        blocks = [part[i : i + bs] for i in range(0, len(part), bs)]
-                        dec_blocks = await asyncio.to_thread(self._decrypt_blocks, blocks)
-                        f_out.write(b"".join(dec_blocks))
-                # последний кусок (включая паддинг)
-                if buf_acc:
-                    if len(buf_acc) % bs != 0:
-                        raise ValueError("ciphertext file not aligned")
-                    blocks = [buf_acc[i : i + bs] for i in range(0, len(buf_acc), bs)]
+        with open(in_path, 'rb') as f_in, open(out_path, 'wb') as f_out:
+            buf_acc = b""
+            while True:
+                buf = f_in.read(chunk)
+                if not buf:
+                    break
+                buf_acc += buf
+                # обрабатываем блоками, паддинг снимем в конце
+                while len(buf_acc) >= chunk:
+                    part, buf_acc = buf_acc[:chunk], buf_acc[chunk:]
+                    blocks = [part[i : i + bs] for i in range(0, len(part), bs)]
                     dec_blocks = await asyncio.to_thread(self._decrypt_blocks, blocks)
-                    plaintext = b"".join(dec_blocks)
-                    plaintext = unpad(plaintext, bs, self.padding)
-                    f_out.write(plaintext)
+                    f_out.write(b"".join(dec_blocks))
+            # последний кусок (включая паддинг)
+            if buf_acc:
+                if len(buf_acc) % bs != 0:
+                    raise ValueError("ciphertext file not aligned")
+                blocks = [buf_acc[i : i + bs] for i in range(0, len(buf_acc), bs)]
+                dec_blocks = await asyncio.to_thread(self._decrypt_blocks, blocks)
+                plaintext = b"".join(dec_blocks)
+                plaintext = unpad(plaintext, bs, self.padding)
+                f_out.write(plaintext)
