@@ -4,7 +4,6 @@ from des import DES
 from Feistel_network import FeistelNetwork
 
 class DEALKeySchedule(KeySchedule):
-
     def __init__(self, rounds: int):
         self.rounds = rounds
 

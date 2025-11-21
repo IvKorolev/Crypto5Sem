@@ -160,7 +160,7 @@ class CryptoContext:
 
         for p in blocks:
             seed = (a * seed + c) & mask
-            seed_bytes = seed.to_bytes(8, 'big')
+            seed_bytes = seed.to_bytes(self.cipher.block_size, 'big')
             gamma = self.cipher.encrypt_block(seed_bytes)
             res.append(_xor(p, gamma))
         return res
