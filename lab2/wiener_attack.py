@@ -1,6 +1,5 @@
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
-from math_context import CryptoService
 from math import isqrt
 
 @dataclass
@@ -81,10 +80,10 @@ class WienerAttackService:
 
     def _verify_phi(self, n: int, phi_n_candidate: int) -> bool:
         """
-        Для корректного φ(n) должно выполняться:
-        1. φ(n) < n
-        2. φ(n) > 0
-        3. p и q (корни уравнения x² - (n - φ(n) + 1)x + n = 0) должны быть целыми
+        Для корректного phi(n) должно выполняться:
+        1. phi(n) < n
+        2. phi(n) > 0
+        3. p и q (корни уравнения x² - (n - phi(n) + 1)x + n = 0) должны быть целыми
         4. p * q = n
         """
         if phi_n_candidate <= 0 or phi_n_candidate >= n:
