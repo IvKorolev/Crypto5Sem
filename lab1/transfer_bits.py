@@ -13,7 +13,6 @@ def _get_bit(byte_seq: bytes, bit_index: int, lsb_first: bool) -> int:
         mask = 1 << (7 - bit_in_byte)
     return 1 if (b & mask) else 0
 
-
 def _set_bit(bits: bytearray, bit_index: int, value: int, lsb_first: bool) -> None:
     byte_i, bit_in_byte = divmod(bit_index, 8)
     if lsb_first:
@@ -24,7 +23,6 @@ def _set_bit(bits: bytearray, bit_index: int, value: int, lsb_first: bool) -> No
         bits[byte_i] |= mask
     else:
         bits[byte_i] &= (~mask) & 0xFF
-
 
 def permute_bits(data: bytes, pblock: Iterable[int], lsb_first: bool = False, start_index0: bool = True) -> bytes:
     total_bits = len(list(pblock))
