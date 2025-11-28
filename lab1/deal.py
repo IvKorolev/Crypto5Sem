@@ -3,29 +3,44 @@ from Interfaces import KeySchedule, SymmetricBlockCipher, RoundFunction
 from des import DES
 from Feistel_network import FeistelNetwork
 
+FIXED_KEY = bytes([0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF])
+
+def _xor_bytes(a: bytes, b: bytes) -> bytes:
+    return bytes(x ^ y for x, y in zip(a, b))
+
 class DEALKeySchedule(KeySchedule):
     def __init__(self, rounds: int):
         self.rounds = rounds
 
     def round_keys(self, master_key: bytes) -> List[bytes]:
-        if len(master_key) == 0:
-            raise ValueError("master key can't be empty")
-        seed = int.from_bytes(master_key, 'big')
-        if seed == 0:
-            seed = 0x9E3779B97F4A7C15
-        a = 6364136223846793005
-        c = 1442695040888963407
-        keys: List[bytes] = []
+        if len(master_key) not in (16, 24, 32):
+            raise ValueError("Key must be 16, 24 or 32 bytes")
+
+        key_blocks = [master_key[i:i + 8] for i in range(0, len(master_key), 8)]
+        s = len(key_blocks)
+
+        keygen_des = DES()
+        keygen_des.configure(FIXED_KEY)
+        round_keys: List[bytes] = []
+        prev_rk = bytes(8)
+
         for i in range(self.rounds):
-            seed = (a * seed + c) & ((1 << 64) - 1)
-            keys.append(seed.to_bytes(8, 'big'))
-        return keys
+            k_part = key_blocks[i % s]
+
+            inp = _xor_bytes(k_part, prev_rk)
+
+            if i >= s:
+                val = 1 << (i - s)
+                h = val.to_bytes(8, 'big')
+                inp = _xor_bytes(inp, h)
+
+            rk = keygen_des.encrypt_block(inp)
+            round_keys.append(rk)
+            prev_rk = rk
+        return round_keys
 
 class DEALFRound(RoundFunction):
-
-    def __init__(self, half_size: int):
-        self.half_size = half_size
-        # кэш готовых объектов DES на ключ K, чтобы не дергать configure каждый раз
+    def __init__(self):
         self._des_cache: dict[bytes, DES] = {}
 
     def _get_des(self, round_key: bytes) -> DES:
@@ -37,36 +52,20 @@ class DEALFRound(RoundFunction):
         return d
 
     def F(self, right_half: bytes, round_key: bytes) -> bytes:
-        if len(right_half) != self.half_size:
-            raise ValueError("DEAL right half must equal Feistel half_size")
+        if len(right_half) != 8:
+            raise ValueError(f"DEAL round function expects 8 bytes, got {len(right_half)}")
 
         des = self._get_des(round_key)
-
-        out_parts = []
-        r = right_half
-        for i in range(0, len(r), 8):
-            chunk = r[i:i+8]
-            if len(chunk) < 8:
-                chunk = chunk + b"\x00" * (8 - len(chunk))
-            c = des.encrypt_block(chunk)  # DES_K(Ri_pad)
-            take = min(8, len(r) - i)
-            out_parts.append(c[:take])
-
-        return b"".join(out_parts)
+        return des.encrypt_block(right_half)
 
 class DEAL(SymmetricBlockCipher):
-    """
-    DEAL: блочный шифр на сети Фейстеля, где F(R, K) строится из DES_K над 8-байтовыми
-    фрагментами R. Поддерживает block_size 16.
-    Ключ: 16/24/32 (128/192/256 бит).
-    """
     def __init__(self, rounds: int = 6, block_size: int = 16):
         if block_size != 16:
             raise ValueError("DEAL block_size must be 16 (128 bits)")
         self.block_size = block_size
         half = block_size // 2
         self._ks = DEALKeySchedule(rounds)
-        self._rf = DEALFRound(half_size=half)
+        self._rf = DEALFRound()
         self._feistel = FeistelNetwork(half_size=half, rounds=rounds, ks=self._ks, rf=self._rf)
 
     def configure(self, key: bytes) -> None:
