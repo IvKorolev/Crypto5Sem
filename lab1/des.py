@@ -114,11 +114,9 @@ PC2 = [
 
 SHIFTS = [1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1]
 
-
 def _left_rotate28(x: int, s: int) -> int:
     x &= (1 << 28) - 1
     return ((x << s) | (x >> (28 - s))) & ((1 << 28) - 1)
-
 
 class DESKeySchedule(KeySchedule):
     def round_keys(self, master_key: bytes) -> List[bytes]:
@@ -138,7 +136,6 @@ class DESKeySchedule(KeySchedule):
             keys.append(rk)
         return keys
 
-
 def _sbox_substitution(b48: int) -> int:
     out = 0
     for i in range(8):
@@ -147,8 +144,7 @@ def _sbox_substitution(b48: int) -> int:
         col = (chunk >> 1) & 0x0F
         val = SBOX[i][row * 16 + col]
         out = (out << 4) | val
-    return out  # 32 бита
-
+    return out
 
 class DESRoundFunction(RoundFunction):
     def F(self, right_half: bytes, round_key: bytes) -> bytes:
@@ -186,4 +182,3 @@ class DES(SymmetricBlockCipher):
         ip = permute_bits(block, IP, lsb_first=False, start_index0=False)
         fd = self._feistel.decrypt_block(ip)
         return permute_bits(fd, FP, lsb_first=False, start_index0=False)
-

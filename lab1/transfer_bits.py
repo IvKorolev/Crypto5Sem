@@ -26,20 +26,7 @@ def _set_bit(bits: bytearray, bit_index: int, value: int, lsb_first: bool) -> No
         bits[byte_i] &= (~mask) & 0xFF
 
 
-def permute_bits(
-    data: bytes,
-    pblock: Iterable[int],
-    lsb_first: bool = False,
-    start_index0: bool = True,
-) -> bytes:
-    """
-    Перестановка битов внутри массива байтов по заданному P-блоку.
-    :param data: входные данные
-    :param pblock: последовательность позиций битов ИСТОЧНИКА в порядке формирования результата
-    :param lsb_first: правила индексирования битов внутри байта
-    :param start_index0: если False, то индексы в pblock считаются 1-основанными
-    :return: переставленные биты тем же размером, что и длина pblock
-    """
+def permute_bits(data: bytes, pblock: Iterable[int], lsb_first: bool = False, start_index0: bool = True) -> bytes:
     total_bits = len(list(pblock))
     src_bits = len(data) * 8
     out = bytearray((total_bits + 7) // 8)

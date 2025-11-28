@@ -7,12 +7,10 @@ class KeySchedule(ABC):
     def round_keys(self, master_key: bytes) -> List[bytes]:
         ...
 
-
 class RoundFunction(ABC):
     @abstractmethod
     def F(self, right_half: bytes, round_key: bytes) -> bytes:
         ...
-
 
 class SymmetricBlockCipher(ABC):
 

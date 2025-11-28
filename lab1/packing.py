@@ -1,8 +1,7 @@
 from Interfaces import SymmetricBlockCipher
-from typing import Iterable, List
+from typing import List
 import os
 import enum
-import math
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
@@ -54,10 +53,8 @@ class CipherMode(enum.Enum):
     CTR = 5
     RANDOM_DELTA = 6
 
-
 def _xor(a: bytes, b: bytes) -> bytes:
     return bytes(x ^ y for x, y in zip(a, b))
-
 
 def _inc_counter(counter: bytearray) -> None:
     for i in range(len(counter) - 1, -1, -1):
@@ -65,13 +62,7 @@ def _inc_counter(counter: bytearray) -> None:
         if counter[i] != 0:
             break
 
-
 class CryptoContext:
-    """
-    Контекст выполнения для блочного шифра с режимами и набивками.
-    Асинхронные методы encrypt/decrypt возвращают bytes и умеют работать с файлами.
-    Параллелизация там, где поддерживается
-    """
     def __init__(
         self,
         cipher: SymmetricBlockCipher,
@@ -265,12 +256,10 @@ class CryptoContext:
                 buf = f_in.read(chunk)
                 if not buf:
                     break
-                # только последняя пачка получает padding
                 if f_in.tell() == size:
                     buf = pad(buf, bs, self.padding)
                 else:
                     if len(buf) % bs != 0:
-                        # дочитаем чтобы кратно блоку
                         tail = f_in.read(bs - (len(buf) % bs))
                         buf += tail
                 blocks = [buf[i : i + bs] for i in range(0, len(buf), bs)]
@@ -287,13 +276,11 @@ class CryptoContext:
                 if not buf:
                     break
                 buf_acc += buf
-                # обрабатываем блоками, паддинг снимем в конце
                 while len(buf_acc) >= chunk:
                     part, buf_acc = buf_acc[:chunk], buf_acc[chunk:]
                     blocks = [part[i : i + bs] for i in range(0, len(part), bs)]
                     dec_blocks = await asyncio.to_thread(self._decrypt_blocks, blocks)
                     f_out.write(b"".join(dec_blocks))
-            # последний кусок (включая паддинг)
             if buf_acc:
                 if len(buf_acc) % bs != 0:
                     raise ValueError("ciphertext file not aligned")

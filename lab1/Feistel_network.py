@@ -2,10 +2,6 @@ from typing import List
 from Interfaces import SymmetricBlockCipher, KeySchedule, RoundFunction
 
 class FeistelNetwork(SymmetricBlockCipher):
-    """
-    Общая сеть Фейстеля с заданными интерфейсами KeySchedule и RoundFunction.
-    Блок: 2 * half_size (в байтах). Полублоки трактуются как bytes.
-    """
     def __init__(self, *, half_size: int, rounds: int, ks: KeySchedule, rf: RoundFunction):
         self.half_size = half_size
         self.rounds = rounds
