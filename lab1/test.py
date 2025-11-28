@@ -73,7 +73,7 @@ async def run_single_test(
             iv=iv
         )
 
-        print(f"⌛ {cipher_name} [{mode_name}] -> {basename}...", end="", flush=True)
+        print(f"{cipher_name} [{mode_name}] -> {basename}...", end="", flush=True)
 
         t1 = time.perf_counter()
         await ctx.encrypt_file(file_path, enc_path)
@@ -99,7 +99,6 @@ async def run_single_test(
         traceback.print_exc()
 
 async def main():
-    print("=== Запуск тестов (Python порт) ===")
     await cleanup_old_files()
 
     files = get_test_files()

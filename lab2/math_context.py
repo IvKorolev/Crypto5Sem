@@ -86,12 +86,6 @@ class CryptoService:
 
     @staticmethod
     def mod_pow(base, exponent, modulus):
-        """
-        Быстрое возведение в степень по модулю
-        Вычисляет (base^exponent) mod modulus
-
-        Использует метод бинарного возведения в степень
-        """
         if modulus == 1:
             return 0
 
